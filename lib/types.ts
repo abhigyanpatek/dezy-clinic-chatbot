@@ -31,5 +31,8 @@ export interface Doctor {
     role: 'user' | 'assistant' | 'system';
     content: string;
     timestamp: Date;
-    functionCall?: any;
+    functionCall?: {
+      name: string;
+      arguments: string;
+    } | null;
   }

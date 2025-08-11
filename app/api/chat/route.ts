@@ -3,6 +3,21 @@ import OpenAI from 'openai';
 import { SYSTEM_PROMPT } from '@/lib/llm-config';
 import { DOCTORS, generateTimeSlots } from '@/lib/constants';
 
+type ToolFunctionCall = {
+  function: { name: string; arguments: string };
+};
+
+type Appointment = {
+  id: string;
+  patientName: string;
+  patientAge: number;
+  patientPhone: string;
+  doctorId: string;
+  date: string;
+  time: string;
+  status: 'confirmed' | 'cancelled' | 'rescheduled';
+};
+
 const openai = new OpenAI({
   apiKey: process.env.GEMINI_API_KEY!,
   baseURL: 'https://generativelanguage.googleapis.com/v1beta/openai/',
@@ -124,7 +139,7 @@ export async function POST(request: NextRequest) {
       }
     ];
 
-    const tools = functions.map(fn => ({ type: 'function' as const, function: fn })) as any;
+    const tools = functions.map(fn => ({ type: 'function' as const, function: fn }));
 
     // Add context about existing appointments
     const contextMessage = appointments.length > 0 
@@ -150,13 +165,13 @@ export async function POST(request: NextRequest) {
 
     // Handle tool calls (function calls)
     if (responseMessage.tool_calls && responseMessage.tool_calls.length > 0) {
-      const toolCall = responseMessage.tool_calls[0] as any;
+      const toolCall = responseMessage.tool_calls[0] as unknown as ToolFunctionCall;
       const functionName = toolCall.function.name;
       const functionArgs = JSON.parse(toolCall.function.arguments);
 
       if (functionName === 'bookAppointment') {
         // Prevent double booking: check existing appointments for conflicts
-        const hasConflict = (appointments || []).some((apt: any) =>
+        const hasConflict = (appointments || []).some((apt: Appointment) =>
           apt.doctorId === functionArgs.doctorId &&
           apt.date === functionArgs.date &&
           apt.time === functionArgs.time &&
@@ -165,12 +180,12 @@ export async function POST(request: NextRequest) {
         if (hasConflict) {
           const allSlots = generateTimeSlots(new Date(functionArgs.date));
           const bookedTimes = (appointments || [])
-            .filter((apt: any) =>
+            .filter((apt: Appointment) =>
               apt.doctorId === functionArgs.doctorId &&
               apt.date === functionArgs.date &&
               apt.status !== 'cancelled'
             )
-            .map((apt: any) => apt.time);
+            .map((apt: Appointment) => apt.time);
           const available = allSlots.filter(t => !bookedTimes.includes(t));
           const suggestions = available.slice(0, 6);
           const doctorName = DOCTORS.find(d => d.id === functionArgs.doctorId)?.name || 'the doctor';
@@ -216,7 +231,7 @@ export async function POST(request: NextRequest) {
         });
       } else if (functionName === 'getAppointmentDetails') {
         // Find matching appointments by phone (if provided) or return all
-        const matching = appointments.filter((apt: any) => {
+        const matching = (appointments as Appointment[]).filter((apt) => {
           if (!functionArgs.patientPhone) return true;
           return apt.patientPhone === functionArgs.patientPhone;
         });
@@ -232,7 +247,7 @@ export async function POST(request: NextRequest) {
 
         const list = matching
           .map(
-            (apt: any) =>
+            (apt: Appointment) =>
               `• ${apt.patientName} with ${
                 DOCTORS.find(d => d.id === apt.doctorId)?.name
               } on ${apt.date} at ${apt.time} (status: ${apt.status})`
